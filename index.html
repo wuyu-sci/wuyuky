@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>物语医研*正态数据生成与分析工具v3.0</title>
+    <!-- 引入jStat库用于统计计算 -->
+    <script src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .main-container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+        }
+        h1, h2, h3 { text-align: center; color: #2c3e50; }
+        h1 { font-size: 26px; margin-bottom: 30px; }
+        h2 { font-size: 22px; margin-top: 40px; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        h3 { font-size: 18px; text-align: left; margin-top: 25px; color: #343a40; }
+
+        .form-section { border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { margin-bottom: 8px; font-weight: 600; color: #555; }
+        .form-group input { padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 15px; }
+        
+        .group-settings-container { margin-top: 20px; }
+        .group-card {
+            border: 1px solid #dee2e6;
+            border-left: 5px solid #007bff;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background-color: #fdfdff;
+        }
+        .group-card h4 { margin: 0 0 15px 0; color: #0056b3; }
+        .group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; }
+
+        .button-container { display: flex; gap: 15px; margin-top: 25px; flex-wrap: wrap; }
+        .action-button {
+            flex-grow: 1;
+            padding: 12px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            background-color: #007bff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .action-button:hover { background-color: #0056b3; }
+        .action-button:disabled { background-color: #a0c7e8; cursor: not-allowed; }
+        .secondary-button { background-color: #6c757d; }
+        .secondary-button:hover { background-color: #5a6268; }
+
+        #status { text-align:center; margin-top:15px; font-weight:bold; }
+        #results-container { margin-top: 30px; }
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 25px;
+            font-size: 14px;
+        }
+        .results-table th, .results-table td {
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            text-align: center;
+        }
+        .results-table th { background-color: #f2f2f2; font-weight: 600; }
+        .results-table td.row-header { text-align: left; font-weight: bold; }
+        .p-value-significant { color: #dc3545; font-weight: bold; }
+
+        .explanation { margin-top: 30px; font-size: 14px; color: #666; background-color: #f8f9fa; padding: 20px; border-radius: 8px; }
+        .explanation code { background-color: #e9ecef; padding: 2px 6px; border-radius: 4px; font-family: "Courier New", Courier, monospace; }
+        .explanation .note { font-size: 13px; color: #e83e8c; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <h1>物语医研*正态数据生成与分析工具v3.0</h1>
+
+        <div class="form-section">
+            <h2>1. 参数设置</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="numGroups">生成组数</label>
+                    <input type="number" id="numGroups" value="3" min="1" step="1">
+                </div>
+                <div class="form-group">
+                    <label for="variableName">变量名</label>
+                    <input type="text" id="variableName" value="BloodPressure">
+                </div>
+                <div class="form-group">
+                    <label for="decimalPlaces">小数位数 (用于生成和分析)</label>
+                    <input type="number" id="decimalPlaces" value="2" min="0" max="15">
+                </div>
+            </div>
+        </div>
+
+        <div id="group-settings-container"></div>
+
+        <div class="button-container">
+            <button id="generateBtn" class="action-button">生成并下载数据</button>
+            <button id="analyzeBtn" class="action-button secondary-button" disabled>进行差异分析</button>
+            <button id="downloadResultsBtn" class="action-button secondary-button" disabled>下载分析结果</button>
+        </div>
+        <div id="status"></div>
+
+        <div id="results-container"></div>
+
+        <div class="explanation">
+            <h3>使用说明与统计指南</h3>
+            <h4>操作流程</h4>
+            <ol>
+                <li>在“参数设置”中输入您希望生成的组数、变量名以及统一的**小数位数**。</li>
+                <li>所有生成的数据将以此小数位数进行四舍五入，确保下载的数据和用于内部分析的数据**完全一致**。</li>
+                <li>点击 <strong>“生成并下载数据”</strong>，下载CSV文件。</li>
+                <li>点击 <strong>“进行差异分析”</strong>，下方将展示基于这份精确数据的分析结果。</li>
+                <li>点击 <strong>“下载分析结果”</strong>，可将所有表格结果保存为<code>.txt</code>文件。</li>
+            </ol>
+
+            <h4>参数填写建议</h4>
+            <p>为了确保数据能被顺利生成，各组的参数设置应符合逻辑。由于数据呈正态分布，大部分数据点会集中在均值附近。一个可靠的经验法则是：</p>
+            <ul>
+                <li><strong>均值</strong> 应大致位于 <strong>最小值</strong> 和 <strong>最大值</strong> 的中间。</li>
+                <li><strong>[最小值, 最大值]</strong> 的范围应足够宽广。一般来说，这个范围至少应是 <strong>6倍标准差</strong> 的宽度 (例如，设置为 <code>均值 ± 3倍标准差</code>)。</li>
+            </ul>
+            <p><strong>示例：</strong>若均值为100，标准差为15，一个安全的范围是 [100 - 3*15, 100 + 3*15]，即 [55, 145]。设置过窄的范围（如[90, 110]）将很可能导致数据生成失败。</p>
+
+            <h4>统计检验选择规则</h4>
+            <ul>
+                <li><strong>方差齐性 (p > 0.05)</strong>:
+                    <ul>
+                        <li>2组: Student's t-检验</li>
+                        <li>3+组: ANOVA，及LSD, S-N-K, Bonferroni多重比较</li>
+                    </ul>
+                </li>
+                <li><strong>方差不齐 (p ≤ 0.05)</strong>:
+                    <ul>
+                        <li>2组: Welch's t-检验</li>
+                        <li>3+组: Welch's ANOVA，及事后多重比较</li>
+                    </ul>
+                </li>
+            </ul>
+            <p class="note"><strong>注：方差不齐时的多重比较:</strong> 本工具采用**成对Welch t检验**，其P值来自于学生t分布。这是一种常见且有效的做法，但与使用“学生化极差分布”的软件（如SPSS的Games-Howell检验）在P值上会有所不同，后者的P值通常更保守（更大）。</p>
+            <p class="note"><strong>注：方差齐性检验:</strong> 本工具采用基于**中位数**的莱文检验（Brown-Forsythe检验），此方法比基于均值的传统莱文检验更为稳健。</p>
+        </div>
+    </div>
+
+<script>
+// 全局状态管理
+const appState = {
+    generatedData: null,
+    analysisResults: null
+};
+const OUTPUT_DP = 4; // 统一分析结果的输出小数位数
+
+// DOM 元素
+const numGroupsInput = document.getElementById('numGroups');
+const groupSettingsContainer = document.getElementById('group-settings-container');
+const generateBtn = document.getElementById('generateBtn');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const downloadResultsBtn = document.getElementById('downloadResultsBtn');
+const statusDiv = document.getElementById('status');
+const resultsContainer = document.getElementById('results-container');
+
+// 初始化
+document.addEventListener('DOMContentLoaded', () => {
+    updateGroupCards();
+    numGroupsInput.addEventListener('change', updateGroupCards);
+    generateBtn.addEventListener('click', handleGenerate);
+    analyzeBtn.addEventListener('click', handleAnalyze);
+    downloadResultsBtn.addEventListener('click', handleDownloadResults);
+});
+
+function updateGroupCards() {
+    const numGroups = parseInt(numGroupsInput.value, 10);
+    groupSettingsContainer.innerHTML = '<h2>2. 各组参数</h2>';
+    if (isNaN(numGroups) || numGroups < 1) return;
+
+    for (let i = 1; i <= numGroups; i++) {
+        const card = document.createElement('div');
+        card.className = 'group-card';
+        card.innerHTML = `
+            <h4>组别 ${i}</h4>
+            <div class="group-grid">
+                <div class="form-group">
+                    <label for="groupName${i}">组名</label>
+                    <input type="text" id="groupName${i}" value="${i}">
+                </div>
+                <div class="form-group">
+                    <label for="sampleSize${i}">样本量</label>
+                    <input type="number" id="sampleSize${i}" value="50" min="3">
+                </div>
+                <div class="form-group">
+                    <label for="mean${i}">均值</label>
+                    <input type="number" id="mean${i}" value="${100 + (i-1)*10}" step="any">
+                </div>
+                <div class="form-group">
+                    <label for="stdDev${i}">标准差</label>
+                    <input type="number" id="stdDev${i}" value="15" min="0" step="any">
+                </div>
+                <div class="form-group">
+                    <label for="minVal${i}">最小值</label>
+                    <input type="number" id="minVal${i}" value="${55 + (i-1)*10}" step="any">
+                </div>
+                <div class="form-group">
+                    <label for="maxVal${i}">最大值</label>
+                    <input type="number" id="maxVal${i}" value="${145 + (i-1)*10}" step="any">
+                </div>
+            </div>
+        `;
+        groupSettingsContainer.appendChild(card);
+    }
+}
+
+function parseInputs() {
+    const numGroups = parseInt(numGroupsInput.value, 10);
+    const globalParams = {
+        numGroups: numGroups,
+        variableName: document.getElementById('variableName').value.trim() || 'Value',
+        decimalPlaces: parseInt(document.getElementById('decimalPlaces').value, 10)
+    };
+
+    const groups = [];
+    for (let i = 1; i <= numGroups; i++) {
+        const group = {
+            name: document.getElementById(`groupName${i}`).value.trim() || `${i}`,
+            n: parseInt(document.getElementById(`sampleSize${i}`).value, 10),
+            mean: parseFloat(document.getElementById(`mean${i}`).value),
+            stdDev: parseFloat(document.getElementById(`stdDev${i}`).value),
+            min: parseFloat(document.getElementById(`minVal${i}`).value),
+            max: parseFloat(document.getElementById(`maxVal${i}`).value)
+        };
+        if (isNaN(group.n) || group.n < 3 || isNaN(group.mean) || isNaN(group.stdDev) || group.stdDev < 0 || isNaN(group.min) || isNaN(group.max) || group.min >= group.max) {
+            throw new Error(`组别 ${i} 的参数无效。请检查样本量(>=3)、标准差(>=0)和最大/最小值。`);
+        }
+        groups.push(group);
+    }
+    return { globalParams, groups };
+}
+
+function boxMullerTransform() {
+    let u1 = 0, u2 = 0;
+    while (u1 === 0) u1 = Math.random();
+    while (u2 === 0) u2 = Math.random();
+    return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+}
+
+function generateDataForGroup(params) {
+    const data = [];
+    let attempts = 0;
+    const maxAttempts = params.n * 200;
+    while (data.length < params.n && attempts < maxAttempts) {
+        const z = boxMullerTransform();
+        const value = params.mean + z * params.stdDev;
+        if (value >= params.min && value <= params.max) {
+            data.push(value);
+        }
+        attempts++;
+    }
+    if (data.length < params.n) {
+        throw new Error(`为组别 "${params.name}" 生成数据失败。在 ${maxAttempts} 次尝试后仅生成 ${data.length} 个样本。请放宽[最小值, 最大值]范围。`);
+    }
+    return data;
+}
+
+function handleGenerate() {
+    try {
+        statusDiv.textContent = '正在生成数据...';
+        statusDiv.style.color = '#333';
+        resultsContainer.innerHTML = '';
+        analyzeBtn.disabled = true;
+        downloadResultsBtn.disabled = true;
+
+        const { globalParams, groups } = parseInputs();
+        
+        appState.generatedData = groups.map(groupParams => {
+            const rawData = generateDataForGroup(groupParams);
+            const dp = globalParams.decimalPlaces;
+            const roundedData = rawData.map(value => parseFloat(value.toFixed(dp)));
+            return { ...groupParams, data: roundedData };
+        });
+
+        let csvContent = `"${"组别"}","${globalParams.variableName}"\n`;
+        appState.generatedData.forEach(group => {
+            group.data.forEach(value => {
+                csvContent += `"${group.name}",${value.toFixed(globalParams.decimalPlaces)}\n`;
+            });
+        });
+
+        downloadFile(csvContent, 'generated_data.csv', 'text/csv;charset=utf-8;');
+        
+        statusDiv.textContent = '数据生成并下载成功！现在可以进行差异分析。';
+        analyzeBtn.disabled = false;
+
+    } catch (error) {
+        statusDiv.textContent = `错误: ${error.message}`;
+        statusDiv.style.color = 'red';
+    }
+}
+
+function downloadFile(content, fileName, mimeType) {
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+    const blob = new Blob([bom, content], { type: mimeType });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+// --- Statistical Analysis ---
+
+function handleAnalyze() {
+    if (!appState.generatedData) {
+        statusDiv.textContent = '请先生成数据。';
+        statusDiv.style.color = 'red';
+        return;
+    }
+
+    try {
+        statusDiv.textContent = '正在进行统计分析...';
+        const results = runAnalysis(appState.generatedData);
+        appState.analysisResults = results;
+        displayResults(results, document.getElementById('variableName').value);
+        statusDiv.textContent = '分析完成！结果与下载的数据完全对应。';
+        downloadResultsBtn.disabled = false;
+    } catch (error) {
+        statusDiv.textContent = `分析错误: ${error.message}`;
+        statusDiv.style.color = 'red';
+        console.error(error);
+    }
+}
+
+function handleDownloadResults() {
+    if (!appState.analysisResults) {
+        statusDiv.textContent = '请先进行分析。';
+        statusDiv.style.color = 'red';
+        return;
+    }
+    const textContent = resultsToText(appState.analysisResults, document.getElementById('variableName').value);
+    downloadFile(textContent, 'analysis_results.txt', 'text/plain;charset=utf-8;');
+}
+
+function runAnalysis(data) {
+    const numGroups = data.length;
+    const results = {};
+
+    results.descriptives = data.map(g => ({
+        name: g.name,
+        n: g.data.length,
+        mean: jStat.mean(g.data),
+        std: jStat.stdev(g.data, true),
+        variance: jStat.variance(g.data, true)
+    }));
+
+    if (numGroups === 1) return results;
+
+    // Levene's test based on MEDIAN (Brown-Forsythe variant) for robustness
+    const transformedData = data.map(g => {
+        const median = jStat.median(g.data);
+        return {
+            ...g,
+            data: g.data.map(val => Math.abs(val - median))
+        };
+    });
+    results.leveneTest = runAnovaLogic(transformedData, "Levene's Test");
+    results.leveneTest.isHomogeneous = results.leveneTest.pValue > 0.05;
+
+    if (numGroups === 2) {
+        const g1 = results.descriptives[0];
+        const g2 = results.descriptives[1];
+        if (results.leveneTest.isHomogeneous) {
+            // Student's t-test for equal variances
+            const pooledVar = ((g1.n - 1) * g1.variance + (g2.n - 1) * g2.variance) / (g1.n + g2.n - 2);
+            const se = Math.sqrt(pooledVar * (1/g1.n + 1/g2.n));
+            const t = (g1.mean - g2.mean) / se;
+            const df = g1.n + g2.n - 2;
+            const p = 2 * (1 - jStat.studentt.cdf(Math.abs(t), df));
+            results.mainTest = { type: "Student's t-test", t, df, pValue: p };
+        } else {
+            // Welch's t-test for unequal variances
+            const welchResult = runPostHocPairwiseWelch([g1, g2])[0];
+            results.mainTest = { ...welchResult, type: "Welch's t-test" };
+        }
+    } else { // 3+ groups
+        if (results.leveneTest.isHomogeneous) {
+            results.mainTest = runAnovaLogic(data, "One-way ANOVA");
+            if (results.mainTest.pValue <= 0.05) {
+                results.postHoc = {
+                    LSD: runPostHocLSD(results.descriptives, results.mainTest.msWithin, results.mainTest.dfWithin),
+                    SNK: runPostHocSNK(results.descriptives, results.mainTest.msWithin, results.mainTest.dfWithin),
+                    Bonferroni: runPostHocBonferroni(results.descriptives, results.mainTest.msWithin, results.mainTest.dfWithin)
+                };
+            }
+        } else {
+            results.mainTest = runWelchAnova(results.descriptives);
+            if (results.mainTest.pValue <= 0.05) {
+                results.postHoc = {
+                    PairwiseWelch: runPostHocPairwiseWelch(results.descriptives)
+                };
+            }
+        }
+    }
+    return results;
+}
+
+function runAnovaLogic(data, type = "ANOVA") {
+    const k = data.length;
+    const groupStats = data.map(g => ({ n: g.data.length, mean: jStat.mean(g.data) }));
+    const grandMean = jStat.mean(data.flatMap(g => g.data));
+    const N = groupStats.reduce((sum, g) => sum + g.n, 0);
+    const ssBetween = groupStats.reduce((sum, g) => sum + g.n * Math.pow(g.mean - grandMean, 2), 0);
+    const ssWithin = data.reduce((sum, g) => sum + jStat.sumsqrd(g.data.map(val => val - jStat.mean(g.data))), 0);
+    const dfBetween = k - 1;
+    const dfWithin = N - k;
+    const msBetween = ssBetween / dfBetween;
+    const msWithin = ssWithin / dfWithin;
+    const F = (msBetween / msWithin) || 0;
+    const pValue = 1 - jStat.centralF.cdf(F, dfBetween, dfWithin);
+    return { type, F, dfBetween, dfWithin, pValue, msWithin };
+}
+
+function runWelchAnova(descriptives) {
+    const k = descriptives.length;
+    const w = descriptives.map(g => g.n / g.variance);
+    const w_sum = jStat.sum(w);
+    const x_bar_w = jStat.sum(descriptives.map((g, i) => w[i] * g.mean)) / w_sum;
+    const numerator = jStat.sum(descriptives.map((g, i) => w[i] * Math.pow(g.mean - x_bar_w, 2))) / (k - 1);
+    const lambda = jStat.sum(descriptives.map((g, i) => Math.pow(1 - w[i]/w_sum, 2) / (g.n - 1)));
+    const denominator = 1 + (2 * (k - 2) / (Math.pow(k, 2) - 1)) * lambda;
+    const F = numerator / denominator;
+    const df1 = k - 1;
+    const df2 = (Math.pow(k, 2) - 1) / (3 * lambda);
+    const pValue = 1 - jStat.centralF.cdf(F, df1, df2);
+    return { type: "Welch's ANOVA", F, dfBetween: df1, dfWithin: df2, pValue };
+}
+
+function runPostHocPairwiseWelch(descriptives) {
+    const k = descriptives.length;
+    const results = [];
+    for (let i = 0; i < k; i++) {
+        for (let j = i + 1; j < k; j++) {
+            const g1 = descriptives[i];
+            const g2 = descriptives[j];
+            const meanDiff = g1.mean - g2.mean;
+            const se = Math.sqrt(g1.variance/g1.n + g2.variance/g2.n);
+            const t_stat = meanDiff / se;
+            const df_num = Math.pow(g1.variance/g1.n + g2.variance/g2.n, 2);
+            const df_den = Math.pow(g1.variance/g1.n, 2)/(g1.n-1) + Math.pow(g2.variance/g2.n, 2)/(g2.n-1);
+            const df = df_num / df_den;
+            const pValue = 2 * (1 - jStat.studentt.cdf(Math.abs(t_stat), df));
+            results.push({
+                comparison: `${g1.name} vs ${g2.name}`,
+                t: t_stat,
+                meanDiff: Math.abs(meanDiff),
+                df,
+                pValue,
+                significant: pValue < 0.05
+            });
+        }
+    }
+    return results;
+}
+
+function runPostHocLSD(descriptives, msWithin, dfWithin) {
+    const k = descriptives.length;
+    const results = [];
+    const t_crit = jStat.studentt.inv(1 - 0.05 / 2, dfWithin);
+    for (let i = 0; i < k; i++) {
+        for (let j = i + 1; j < k; j++) {
+            const g1 = descriptives[i];
+            const g2 = descriptives[j];
+            const meanDiff = Math.abs(g1.mean - g2.mean);
+            const se = Math.sqrt(msWithin * (1/g1.n + 1/g2.n));
+            const t_stat = meanDiff / se;
+            const pValue = 2 * (1 - jStat.studentt.cdf(t_stat, dfWithin));
+            const criticalValue = t_crit * se;
+            results.push({
+                comparison: `${g1.name} vs ${g2.name}`,
+                meanDiff,
+                criticalValue,
+                pValue,
+                significant: pValue < 0.05
+            });
+        }
+    }
+    return results;
+}
+
+function runPostHocBonferroni(descriptives, msWithin, dfWithin) {
+    const k = descriptives.length;
+    const numComparisons = k * (k - 1) / 2;
+    const results = [];
+    for (let i = 0; i < k; i++) {
+        for (let j = i + 1; j < k; j++) {
+            const g1 = descriptives[i];
+            const g2 = descriptives[j];
+            const meanDiff = Math.abs(g1.mean - g2.mean);
+            const se = Math.sqrt(msWithin * (1/g1.n + 1/g2.n));
+            const t_stat = meanDiff / se;
+            const rawPValue = 2 * (1 - jStat.studentt.cdf(t_stat, dfWithin));
+            const correctedPValue = Math.min(1, rawPValue * numComparisons);
+            results.push({
+                comparison: `${g1.name} vs ${g2.name}`,
+                meanDiff,
+                pValue: correctedPValue,
+                significant: correctedPValue < 0.05
+            });
+        }
+    }
+    return results;
+}
+
+function runPostHocSNK(descriptives, msWithin, dfWithin) {
+    const k = descriptives.length;
+    const results = [];
+    const sortedMeans = descriptives.slice().sort((a, b) => a.mean - b.mean);
+    const q_crit_values = {2: 2.8, 3: 3.3, 4: 3.6, 5: 3.8, 6: 4.0};
+
+    for (let p = k; p >= 2; p--) {
+        for (let i = 0; i <= k - p; i++) {
+            const j = i + p - 1;
+            const g_i = sortedMeans[i];
+            const g_j = sortedMeans[j];
+            const q_crit = q_crit_values[p] || 4.0;
+            const criticalValue = q_crit * Math.sqrt(msWithin * ( (1/g_i.n + 1/g_j.n)/2 ));
+            const meanDiff = g_j.mean - g_i.mean;
+            results.push({
+                comparison: `${g_j.name} vs ${g_i.name}`,
+                meanDiff,
+                criticalValue,
+                pValue: 'N/A',
+                significant: meanDiff > criticalValue
+            });
+        }
+    }
+     return results.sort((a,b) => b.meanDiff - a.meanDiff);
+}
+
+
+function formatP(p) {
+    if (typeof p === 'string') return p;
+    if (p < 0.0001) return `<span class="p-value-significant">&lt;0.0001</span>`;
+    const formatted = p.toFixed(OUTPUT_DP);
+    return p <= 0.05 ? `<span class="p-value-significant">${formatted}</span>` : formatted;
+}
+
+function displayResults(results, varName) {
+    let html = '<h2>3. 分析结果</h2>';
+
+    html += `<h3>描述性统计 (${varName})</h3>
+        <table class="results-table">
+            <tr><th>组别</th><th>样本量(n)</th><th>均值</th><th>标准差</th></tr>`;
+    results.descriptives.forEach(g => {
+        html += `<tr><td>${g.name}</td><td>${g.n}</td><td>${g.mean.toFixed(OUTPUT_DP)}</td><td>${g.std.toFixed(OUTPUT_DP)}</td></tr>`;
+    });
+    html += `</table>`;
+
+    if (results.leveneTest) {
+        html += `<h3>方差齐性检验 (${results.leveneTest.type})</h3>
+            <table class="results-table">
+                <tr><th>F值</th><th>df1</th><th>df2</th><th>P值</th><th>结论</th></tr>
+                <tr>
+                    <td>${results.leveneTest.F.toFixed(3)}</td><td>${results.leveneTest.dfBetween}</td>
+                    <td>${results.leveneTest.dfWithin.toFixed(0)}</td><td>${formatP(results.leveneTest.pValue)}</td>
+                    <td>${results.leveneTest.isHomogeneous ? '方差齐 (p > 0.05)' : '<span class="p-value-significant">方差不齐 (p ≤ 0.05)</span>'}</td>
+                </tr>
+            </table>`;
+    }
+
+    if (results.mainTest) {
+        const test = results.mainTest;
+        html += `<h3>假设检验 (${test.type})</h3><table class="results-table">`;
+        if (test.type.includes('t-test')) {
+            html += `<tr><th>t值</th><th>自由度(df)</th><th>P值 (双尾)</th></tr>
+                <tr><td>${test.t.toFixed(3)}</td><td>${test.df.toFixed(3)}</td><td>${formatP(test.pValue)}</td></tr>`;
+        } else {
+            html += `<tr><th>F值</th><th>组间df</th><th>组内df</th><th>P值</th></tr>
+                <tr><td>${test.F.toFixed(3)}</td><td>${test.dfBetween}</td><td>${test.dfWithin.toFixed(3)}</td><td>${formatP(test.pValue)}</td></tr>`;
+        }
+        html += `</table>`;
+    }
+
+    if (results.postHoc) {
+        html += `<h3>事后多重比较</h3>`;
+        for (const [method, data] of Object.entries(results.postHoc)) {
+            let methodName = method;
+            if (method === 'PairwiseWelch') {
+                methodName = '成对t检验 (Welch)';
+            }
+            
+            html += `<h4>${methodName} 法</h4><table class="results-table">`;
+
+            if (method === 'LSD') {
+                html += `<tr><th>比较</th><th>均值差</th><th>临界值</th><th>P值</th><th>是否显著</th></tr>`;
+                data.forEach(r => {
+                    html += `<tr><td>${r.comparison}</td><td>${r.meanDiff.toFixed(OUTPUT_DP)}</td><td>${r.criticalValue.toFixed(OUTPUT_DP)}</td><td>${formatP(r.pValue)}</td><td>${r.significant ? '<span class="p-value-significant">是</span>' : '否'}</td></tr>`;
+                });
+            } else if (method === 'Bonferroni') {
+                html += `<tr><th>比较</th><th>均值差</th><th>校正P值</th><th>是否显著</th></tr>`;
+                 data.forEach(r => {
+                    html += `<tr><td>${r.comparison}</td><td>${r.meanDiff.toFixed(OUTPUT_DP)}</td><td>${formatP(r.pValue)}</td><td>${r.significant ? '<span class="p-value-significant">是</span>' : '否'}</td></tr>`;
+                });
+            } else if (method === 'SNK') {
+                html += `<tr><th>比较</th><th>均值差</th><th>临界值</th><th>P值</th><th>是否显著</th></tr>`;
+                data.forEach(r => {
+                    html += `<tr><td>${r.comparison}</td><td>${r.meanDiff.toFixed(OUTPUT_DP)}</td><td>${r.criticalValue.toFixed(OUTPUT_DP)}</td><td>${r.pValue}</td><td>${r.significant ? '<span class="p-value-significant">是</span>' : '否'}</td></tr>`;
+                });
+            } else { // PairwiseWelch
+                html += `<tr><th>比较</th><th>均值差</th><th>df</th><th>P值</th><th>是否显著</th></tr>`;
+                data.forEach(r => {
+                    html += `<tr><td>${r.comparison}</td><td>${r.meanDiff.toFixed(OUTPUT_DP)}</td><td>${r.df.toFixed(2)}</td><td>${formatP(r.pValue)}</td><td>${r.significant ? '<span class="p-value-significant">是</span>' : '否'}</td></tr>`;
+                });
+            }
+            html += `</table>`;
+        }
+    }
+    resultsContainer.innerHTML = html;
+}
+
+function resultsToText(results, varName) {
+    let text = `综合统计分析报告\n========================\n\n`;
+
+    text += `1. 描述性统计 (${varName})\n------------------------\n`;
+    text += "组别\t样本量\t均值\t标准差\n";
+    results.descriptives.forEach(g => {
+        text += `${g.name}\t${g.n}\t${g.mean.toFixed(OUTPUT_DP)}\t${g.std.toFixed(OUTPUT_DP)}\n`;
+    });
+    text += "\n";
+
+    if (results.leveneTest) {
+        text += `2. 方差齐性检验 (${results.leveneTest.type})\n------------------------\n`;
+        text += `F = ${results.leveneTest.F.toFixed(3)}, df1 = ${results.leveneTest.dfBetween}, df2 = ${results.leveneTest.dfWithin.toFixed(0)}, p = ${results.leveneTest.pValue.toFixed(4)}\n`;
+        text += `结论: ${results.leveneTest.isHomogeneous ? '方差齐 (p > 0.05)' : '方差不齐 (p ≤ 0.05)'}\n\n`;
+    }
+
+    if (results.mainTest) {
+        const test = results.mainTest;
+        text += `3. 假设检验 (${test.type})\n------------------------\n`;
+        if (test.type.includes('t-test')) {
+            text += `t = ${test.t.toFixed(3)}, df = ${test.df.toFixed(3)}, p = ${test.pValue.toFixed(4)}\n\n`;
+        } else {
+            text += `F = ${test.F.toFixed(3)}, df_between = ${test.dfBetween}, df_within = ${test.dfWithin.toFixed(3)}, p = ${test.pValue.toFixed(4)}\n\n`;
+        }
+    }
+
+    if (results.postHoc) {
+        text += `4. 事后多重比较\n------------------------\n`;
+        for (const [method, data] of Object.entries(results.postHoc)) {
+            let methodName = method;
+            if (method === 'PairwiseWelch') {
+                methodName = '成对t检验 (Welch)';
+            }
+            text += `\n--- ${methodName} 法 ---\n`;
+
+            let header = "比较\t均值差\t";
+            if (method === 'LSD' || method === 'SNK') header += "临界值\t";
+            if (method === 'PairwiseWelch') header += "df\t";
+            header += "P值\t显著性\n";
+            text += header;
+
+            data.forEach(r => {
+                let pValueStr = (typeof r.pValue === 'string') ? r.pValue : (r.pValue < 0.0001 ? '<0.0001' : r.pValue.toFixed(OUTPUT_DP));
+                text += `${r.comparison}\t${r.meanDiff.toFixed(OUTPUT_DP)}\t`;
+                if (method === 'LSD' || method === 'SNK') text += `${r.criticalValue.toFixed(OUTPUT_DP)}\t`;
+                if (method === 'PairwiseWelch') text += `${r.df.toFixed(2)}\t`;
+                text += `${pValueStr}\t${r.significant ? '是' : '否'}\n`;
+            });
+        }
+    }
+    return text;
+}
+
+</script>
+</body>
+</html>
