@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>摘要方差分析 + 多重比较计算器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+        .result-fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 p-4 md:p-8">
+
+    <div class="max-w-5xl mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
+        <div class="bg-indigo-700 p-5 text-white flex justify-between items-center flex-wrap gap-2">
+            <div>
+                <h1 class="text-2xl font-bold">物语科研 & 摘要方差分析</h1>
+                <p class="text-sm opacity-90">基于摘要数据 (Mean, SD, N) 进行完整分析</p>
+            </div>
+            <div class="text-xs bg-indigo-800 px-3 py-1 rounded border border-indigo-500">
+                算法: One-Way ANOVA + Bonferroni Correction
+            </div>
+        </div>
+
+        <div class="p-6">
+            <!-- Data Input Section -->
+            <div class="mb-8">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-lg font-semibold text-gray-700 border-l-4 border-indigo-600 pl-2">1. 数据录入</h2>
+                    <button onclick="addGroup()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded text-sm transition shadow-sm flex items-center gap-1">
+                        <span class="text-lg font-bold">+</span> 添加组
+                    </button>
+                </div>
+                
+                <div class="overflow-x-auto rounded-lg border border-gray-200">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 text-gray-600 text-sm uppercase tracking-wider">
+                                <th class="p-3 border-b font-semibold">组别名称</th>
+                                <th class="p-3 border-b font-semibold w-32">样本量 (n)</th>
+                                <th class="p-3 border-b font-semibold w-32">均值 (Mean)</th>
+                                <th class="p-3 border-b font-semibold w-32">标准差 (SD)</th>
+                                <th class="p-3 border-b text-center w-16">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inputRows" class="bg-white divide-y divide-gray-100">
+                            <!-- Rows will be added here via JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="errorMsg" class="text-red-500 text-sm mt-2 hidden font-medium"></div>
+            </div>
+
+            <!-- Action Button -->
+            <div class="flex justify-center mb-10">
+                <button onclick="performAnalysis()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-10 rounded-full shadow-lg transition transform hover:scale-105 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                    开始分析
+                </button>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsArea" class="hidden space-y-8 result-fade-in">
+                
+                <!-- ANOVA Table -->
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-700 border-l-4 border-blue-500 pl-2 mb-3">2. 方差分析结果 (ANOVA)</h2>
+                    <div class="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-800 text-white text-sm">
+                                <tr>
+                                    <th class="p-3">差异源</th>
+                                    <th class="p-3">平方和 (SS)</th>
+                                    <th class="p-3">自由度 (df)</th>
+                                    <th class="p-3">均方 (MS)</th>
+                                    <th class="p-3">F 值</th>
+                                    <th class="p-3">P 值</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-gray-700 text-sm">
+                                <tr class="border-b hover:bg-gray-50">
+                                    <td class="p-3 font-medium">组间 (Between)</td>
+                                    <td class="p-3" id="res_ssb">-</td>
+                                    <td class="p-3" id="res_dfb">-</td>
+                                    <td class="p-3" id="res_msb">-</td>
+                                    <td class="p-3 font-bold text-blue-600" id="res_f">-</td>
+                                    <td class="p-3 font-bold" id="res_p">-</td>
+                                </tr>
+                                <tr class="border-b hover:bg-gray-50">
+                                    <td class="p-3 font-medium">组内 (Within/Error)</td>
+                                    <td class="p-3" id="res_ssw">-</td>
+                                    <td class="p-3" id="res_dfw">-</td>
+                                    <td class="p-3 bg-yellow-50 font-mono text-yellow-700" id="res_msw">-</td>
+                                    <td class="p-3"></td>
+                                    <td class="p-3"></td>
+                                </tr>
+                                <tr class="bg-gray-50 font-semibold text-gray-500">
+                                    <td class="p-3">总计 (Total)</td>
+                                    <td class="p-3" id="res_sst">-</td>
+                                    <td class="p-3" id="res_dft">-</td>
+                                    <td class="p-3"></td>
+                                    <td class="p-3"></td>
+                                    <td class="p-3"></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 text-sm text-gray-500">
+                        * 黄色高亮数值为 <strong>MS<sub>within</sub></strong>，用于后续多重比较计算。
+                    </div>
+                </div>
+
+                <!-- Post-hoc Table -->
+                <div id="postHocSection">
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="text-lg font-semibold text-gray-700 border-l-4 border-green-500 pl-2">3. 多重比较 (Bonferroni Test)</h2>
+                        <span class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">显著性水平 α = 0.05</span>
+                    </div>
+                    
+                    <div class="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
+                        <table class="w-full text-left">
+                            <thead class="bg-green-700 text-white text-sm">
+                                <tr>
+                                    <th class="p-3">对比组别 (A vs B)</th>
+                                    <th class="p-3">均值差 (A-B)</th>
+                                    <th class="p-3">标准误 (SE)</th>
+                                    <th class="p-3">t 值</th>
+                                    <th class="p-3">P 值 (调整后)</th>
+                                    <th class="p-3">结论</th>
+                                </tr>
+                            </thead>
+                            <tbody id="postHocBody" class="text-gray-700 text-sm divide-y divide-gray-100">
+                                <!-- Post hoc rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-3 p-3 bg-blue-50 text-blue-800 text-sm rounded border border-blue-100">
+                        <strong>说明：</strong> 此处采用 Bonferroni 校正法。如果 ANOVA 的总体 P 值不显著 (>0.05)，通常不建议过度解读多重比较结果。
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize
+        window.onload = function() {
+            addGroup("A");
+            addGroup("B");
+            addGroup("C");
+        };
+
+        const groupNames = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
+
+        function addGroup(defaultName = "") {
+            const tbody = document.getElementById('inputRows');
+            const index = tbody.children.length;
+            const name = defaultName || (index < groupNames.length ? groupNames[index] : `Group ${index+1}`);
+            
+            const tr = document.createElement('tr');
+            tr.className = "hover:bg-gray-50 transition";
+            tr.innerHTML = `
+                <td class="p-3"><input type="text" value="${name}" class="w-full border-b border-gray-300 focus:border-indigo-500 outline-none bg-transparent name-input font-medium text-gray-700"></td>
+                <td class="p-3"><input type="number" step="1" min="2" class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none n-input transition" placeholder="n"></td>
+                <td class="p-3"><input type="number" step="any" class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none mean-input transition" placeholder="Mean"></td>
+                <td class="p-3"><input type="number" step="any" min="0" class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none sd-input transition" placeholder="SD"></td>
+                <td class="p-3 text-center">
+                    <button onclick="removeRow(this)" class="text-gray-400 hover:text-red-500 transition text-xl font-bold">&times;</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        }
+
+        function removeRow(btn) {
+            const tbody = document.getElementById('inputRows');
+            if (tbody.children.length > 2) {
+                btn.closest('tr').remove();
+            } else {
+                alert("至少需要两组数据。");
+            }
+        }
+
+        function performAnalysis() {
+            const names = document.querySelectorAll('.name-input');
+            const nInputs = document.querySelectorAll('.n-input');
+            const meanInputs = document.querySelectorAll('.mean-input');
+            const sdInputs = document.querySelectorAll('.sd-input');
+            
+            let groups = [];
+            let totalN = 0;
+            let sumX = 0;
+            let valid = true;
+
+            // 1. Parse Data
+            for (let i = 0; i < nInputs.length; i++) {
+                let name = names[i].value.trim() || `Group ${i+1}`;
+                let n = parseFloat(nInputs[i].value);
+                let mean = parseFloat(meanInputs[i].value);
+                let sd = parseFloat(sdInputs[i].value);
+
+                if (isNaN(n) || isNaN(mean) || isNaN(sd)) {
+                    valid = false; break;
+                }
+                if (n < 2) {
+                    alert(`"${name}" 的样本量必须大于 1`);
+                    return;
+                }
+
+                groups.push({ name, n, mean, sd });
+                totalN += n;
+                sumX += (n * mean);
+            }
+
+            if (!valid) {
+                document.getElementById('errorMsg').innerText = "请填写所有完整的数值 (N, Mean, SD)。";
+                document.getElementById('errorMsg').classList.remove('hidden');
+                document.getElementById('resultsArea').classList.add('hidden');
+                return;
+            }
+            document.getElementById('errorMsg').classList.add('hidden');
+
+            // --- ANOVA Calculation ---
+            const grandMean = sumX / totalN;
+            const k = groups.length; 
+
+            let ssb = 0;
+            let ssw = 0;
+
+            groups.forEach(g => {
+                ssb += g.n * Math.pow(g.mean - grandMean, 2);
+                ssw += (g.n - 1) * Math.pow(g.sd, 2);
+            });
+
+            const sst = ssb + ssw;
+            const dfb = k - 1;
+            const dfw = totalN - k;
+            const dft = totalN - 1;
+            const msb = ssb / dfb;
+            const msw = ssw / dfw; // This is crucial for Post-hoc
+            const fVal = msb / msw;
+            const pVal = fDistributionPValue(fVal, dfb, dfw);
+
+            // Render ANOVA
+            document.getElementById('res_ssb').innerText = ssb.toFixed(3);
+            document.getElementById('res_dfb').innerText = dfb;
+            document.getElementById('res_msb').innerText = msb.toFixed(3);
+            
+            document.getElementById('res_ssw').innerText = ssw.toFixed(3);
+            document.getElementById('res_dfw').innerText = dfw;
+            document.getElementById('res_msw').innerText = msw.toFixed(3);
+
+            document.getElementById('res_sst').innerText = sst.toFixed(3);
+            document.getElementById('res_dft').innerText = dft;
+
+            document.getElementById('res_f').innerText = fVal.toFixed(3);
+            
+            let pText = pVal < 0.001 ? "< 0.001" : pVal.toFixed(4);
+            let pColor = pVal < 0.05 ? "text-red-600" : "text-gray-700";
+            document.getElementById('res_p').innerHTML = `<span class="${pColor}">${pText}</span>`;
+
+            // --- Post-hoc Calculation (Bonferroni) ---
+            const postHocBody = document.getElementById('postHocBody');
+            postHocBody.innerHTML = "";
+            
+            // Number of comparisons: k * (k-1) / 2
+            const numComparisons = (k * (k - 1)) / 2;
+
+            for (let i = 0; i < k; i++) {
+                for (let j = i + 1; j < k; j++) {
+                    const g1 = groups[i];
+                    const g2 = groups[j];
+
+                    // Difference
+                    const diff = g1.mean - g2.mean;
+                    
+                    // Standard Error for difference: sqrt(MSw * (1/n1 + 1/n2))
+                    const se = Math.sqrt(msw * (1/g1.n + 1/g2.n));
+                    
+                    // t-value
+                    const t = Math.abs(diff) / se;
+                    
+                    // Unadjusted P-value (Two-tailed t-test with df = dfw)
+                    // Note: t^2 follows F(1, dfw) distribution
+                    const pRaw = fDistributionPValue(t*t, 1, dfw);
+                    
+                    // Bonferroni Adjustment
+                    let pAdj = pRaw * numComparisons;
+                    if (pAdj > 1) pAdj = 1;
+
+                    // Render Row
+                    const isSig = pAdj < 0.05;
+                    const row = document.createElement('tr');
+                    row.className = isSig ? "bg-green-50" : "hover:bg-gray-50";
+                    
+                    row.innerHTML = `
+                        <td class="p-3 font-medium">${g1.name} vs ${g2.name}</td>
+                        <td class="p-3">${diff.toFixed(3)}</td>
+                        <td class="p-3 text-gray-500">${se.toFixed(3)}</td>
+                        <td class="p-3 text-gray-500">${t.toFixed(3)}</td>
+                        <td class="p-3 font-mono ${isSig ? 'text-red-600 font-bold' : 'text-gray-400'}">
+                            ${pAdj < 0.001 ? '< 0.001' : pAdj.toFixed(4)}
+                        </td>
+                        <td class="p-3">
+                            ${isSig 
+                                ? '<span class="text-green-700 font-bold text-xs border border-green-200 bg-green-100 px-2 py-1 rounded">显著差异</span>' 
+                                : '<span class="text-gray-400 text-xs">无显著差异</span>'}
+                        </td>
+                    `;
+                    postHocBody.appendChild(row);
+                }
+            }
+
+            document.getElementById('resultsArea').classList.remove('hidden');
+        }
+
+        // --- Stats Logic (Reused from previous, simplified) ---
+        // Using Beta function for F-distribution CDF
+        function fDistributionPValue(f, d1, d2) {
+            if (f <= 0) return 1.0;
+            let x = d2 / (d2 + d1 * f);
+            return incompleteBeta(x, d2/2, d1/2);
+        }
+
+        function logGamma(n) {
+            const p = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+            let x = n, y = x, tmp = x + 7.5;
+            tmp -= (x + 0.5) * Math.log(tmp);
+            let ser = p[0];
+            for (let j = 1; j < p.length; j++) ser += p[j] / ++y;
+            return -tmp + Math.log(2.5066282746310005 * ser / x);
+        }
+
+        function incompleteBeta(x, a, b) {
+            if (x === 0) return 0; if (x === 1) return 1;
+            if (x > (a + 1) / (a + b + 2)) return 1 - incompleteBeta(1 - x, b, a);
+            const lbeta = logGamma(a) + logGamma(b) - logGamma(a + b);
+            const front = Math.exp(a * Math.log(x) + b * Math.log(1 - x) - lbeta) / a;
+            let f = 1.0, c = 1.0, d = 0.0;
+            for (let m = 1; m <= 100; m++) {
+                let numer, m2 = m * 2;
+                if (m % 2 === 0) { let k = m / 2; numer = (k * (b - k) * x) / ((a + m2 - 1) * (a + m2)); }
+                else { let k = (m - 1) / 2; numer = -((a + k) * (a + b + k) * x) / ((a + m2 - 1) * (a + m2)); }
+                d = 1.0 + numer * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1.0 / d;
+                c = 1.0 + numer / c; if (Math.abs(c) < 1e-30) c = 1e-30;
+                const delta = c * d; f *= delta;
+                if (Math.abs(delta - 1.0) < 3e-7) break;
+            }
+            return front * f;
+        }
+    </script>
+</body>
+</html>
