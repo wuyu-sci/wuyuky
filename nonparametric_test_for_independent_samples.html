@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>独立样本非参数检验分析系统</title>
+    
+    <!-- 引入 React 和 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- 引入 Babel 用于在浏览器中编译 JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- 引入 Tailwind CSS 用于样式 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- 配置 MathJax 用于渲染数学公式 -->
+    <script>
+      MathJax = {
+        tex: { inlineMath: [['\\(', '\\)']] }
+      };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+
+        // --- 图标组件 (替换原先的 lucide-react) ---
+        const BarChartIcon = () => (
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+        );
+        const TableIcon = () => (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+        );
+        const ArrowRightIcon = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        );
+
+        // --- 统计学核心算法 ---
+        function normalCDF(x) {
+            const t = 1 / (1 + 0.2316419 * Math.abs(x));
+            const d = 0.3989423 * Math.exp(-x * x / 2);
+            const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+            return x > 0 ? 1 - p : p;
+        }
+
+        function chiSquarePValue(x, df) {
+            if (x <= 0) return 1;
+            if (df === 1) return 2 * (1 - normalCDF(Math.sqrt(x)));
+            const z = (Math.pow(x / df, 1 / 3) - (1 - 2 / (9 * df))) / Math.sqrt(2 / (9 * df));
+            return 1 - normalCDF(z);
+        }
+
+        function calculateRanks(data) {
+            const sorted = [...data].sort((a, b) => a.value - b.value);
+            let i = 0;
+            let tieCorrectionSum = 0;
+
+            while (i < sorted.length) {
+                let j = i;
+                while (j < sorted.length && sorted[j].value === sorted[i].value) {
+                    j++;
+                }
+                const tieCount = j - i;
+                const avgRank = (i + 1 + j) / 2;
+                
+                for (let k = i; k < j; k++) {
+                    sorted[k].rank = avgRank;
+                }
+                
+                if (tieCount > 1) {
+                    tieCorrectionSum += (Math.pow(tieCount, 3) - tieCount);
+                }
+                i = j;
+            }
+            return { rankedData: sorted, tieCorrectionSum };
+        }
+
+        // --- 主组件 ---
+        function NonParametricTool() {
+            const [dataType, setDataType] = useState('ordinal');
+            
+            const defaultOrdinalText = "组别\t等级\t频数\nA组\t轻度\t12\nA组\t中度\t8\nA组\t重度\t5\nA组\t重度\t2\nB组\t轻度\t4\nB组\t中度\t15\nB组\t重度\t10\nC组\t轻度\t2\nC组\t中度\t5\nC组\t重度\t20";
+            const defaultContinuousText = "组别\t数值\nA组\t23.5\nA组\t25.1\nA组\t21.8\nB组\t34.2\nB组\t36.7\nB组\t31.5";
+            
+            const [inputText, setInputText] = useState(defaultOrdinalText);
+            const [ordinalOrder, setOrdinalOrder] = useState([]);
+            const [analysisResult, setAnalysisResult] = useState(null);
+
+            const handleTypeChange = (type) => {
+                setDataType(type);
+                if (inputText === defaultOrdinalText || inputText === defaultContinuousText || inputText.trim() === "") {
+                    setInputText(type === 'ordinal' ? defaultOrdinalText : defaultContinuousText);
+                }
+                setAnalysisResult(null);
+            };
+
+            const parsedData = useMemo(() => {
+                if (!inputText) return { valid: false, aggregated: [], groups: [], uniqueValues: [], totalN: 0 };
+                
+                const lines = inputText.trim().split('\n');
+                const map = new Map();
+                const groupSet = new Set();
+                const valueSet = new Set();
+                let totalN = 0;
+
+                let startIndex = 0;
+                if (lines[0].match(/组|频|数|等|级|Group|Value|Freq/i)) {
+                    startIndex = 1;
+                }
+
+                for (let i = startIndex; i < lines.length; i++) {
+                    const parts = lines[i].split(/[\t, ]+/).filter(Boolean);
+                    if (parts.length >= 2) {
+                        const group = parts[0].trim();
+                        const rawValue = parts[1].trim();
+                        let freq = parts.length >= 3 ? parseInt(parts[2], 10) : 1;
+                        
+                        if (isNaN(freq) || freq <= 0) continue;
+
+                        if (group && rawValue) {
+                            const key = `${group}_|_${rawValue}`;
+                            if (map.has(key)) {
+                                map.get(key).freq += freq;
+                            } else {
+                                map.set(key, { group, rawValue, freq });
+                            }
+                            groupSet.add(group);
+                            valueSet.add(rawValue);
+                            totalN += freq;
+                        }
+                    }
+                }
+
+                const aggregated = Array.from(map.values());
+
+                return {
+                    valid: aggregated.length > 0 && groupSet.size >= 2,
+                    aggregated,
+                    groups: Array.from(groupSet),
+                    uniqueValues: Array.from(valueSet),
+                    totalN
+                };
+            }, [inputText]);
+
+            useEffect(() => {
+                if (dataType === 'ordinal' && parsedData.uniqueValues.length > 0) {
+                    const sorted = [...parsedData.uniqueValues].sort((a, b) => {
+                        const order = {"轻度":1, "中度":2, "重度":3, "+":1, "++":2, "+++":3};
+                        if (order[a] && order[b]) return order[a] - order[b];
+                        return a.localeCompare(b);
+                    });
+                    if (sorted.length !== ordinalOrder.length || !sorted.every(v => ordinalOrder.includes(v))) {
+                        setOrdinalOrder(sorted);
+                    }
+                }
+            }, [dataType, parsedData.uniqueValues]);
+
+            const moveOrdinal = (index, direction) => {
+                const newOrder = [...ordinalOrder];
+                if (direction === 'up' && index > 0) {
+                    [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
+                } else if (direction === 'down' && index < newOrder.length - 1) {
+                    [newOrder[index + 1], newOrder[index]] = [newOrder[index], newOrder[index + 1]];
+                }
+                setOrdinalOrder(newOrder);
+            };
+
+            const runAnalysis = () => {
+                if (!parsedData.valid) return;
+
+                let expandedData = [];
+                for (const item of parsedData.aggregated) {
+                    let numericVal;
+                    if (dataType === 'continuous') {
+                        numericVal = parseFloat(item.rawValue);
+                        if (isNaN(numericVal)) continue;
+                    } else {
+                        numericVal = ordinalOrder.indexOf(item.rawValue) + 1;
+                        if (numericVal === 0) continue;
+                    }
+                    
+                    for (let i = 0; i < item.freq; i++) {
+                        expandedData.push({ group: item.group, value: numericVal });
+                    }
+                }
+
+                const N = expandedData.length;
+                if (N === 0) return;
+
+                const { rankedData, tieCorrectionSum } = calculateRanks(expandedData);
+                
+                const groupStats = {};
+                parsedData.groups.forEach(g => {
+                    groupStats[g] = { n: 0, rankSum: 0 };
+                });
+
+                rankedData.forEach(item => {
+                    groupStats[item.group].n += 1;
+                    groupStats[item.group].rankSum += item.rank;
+                });
+
+                const k = parsedData.groups.length;
+                const tieCorrection = 1 - (tieCorrectionSum / (Math.pow(N, 3) - N));
+                
+                let result = { k, N, groupStats, testName: '', statistic: 0, pValue: 0, statName: '', comparisons: [] };
+
+                if (k === 2) {
+                    result.testName = 'Mann-Whitney U 检验';
+                    const g1 = parsedData.groups[0];
+                    const g2 = parsedData.groups[1];
+                    const n1 = groupStats[g1].n;
+                    const n2 = groupStats[g2].n;
+                    const R1 = groupStats[g1].rankSum;
+                    const R2 = groupStats[g2].rankSum;
+
+                    const U1 = n1 * n2 + (n1 * (n1 + 1)) / 2 - R1;
+                    const U2 = n1 * n2 + (n2 * (n2 + 1)) / 2 - R2;
+                    const U = Math.min(U1, U2);
+
+                    const mU = (n1 * n2) / 2;
+                    const sigmaU = Math.sqrt((n1 * n2 * (N + 1) * tieCorrection) / 12);
+                    const Z = (U - mU) / sigmaU;
+                    
+                    result.statName = 'Z';
+                    result.statistic = Z;
+                    result.pValue = 2 * (1 - normalCDF(Math.abs(Z)));
+                    result.U = U;
+
+                } else if (k > 2) {
+                    result.testName = 'Kruskal-Wallis H 检验';
+                    let sumR2_n = 0;
+                    parsedData.groups.forEach(g => {
+                        const n_i = groupStats[g].n;
+                        const R_i = groupStats[g].rankSum;
+                        if (n_i > 0) sumR2_n += Math.pow(R_i, 2) / n_i;
+                    });
+
+                    let H = (12 / (N * (N + 1))) * sumR2_n - 3 * (N + 1);
+                    if (tieCorrection > 0) H = H / tieCorrection;
+
+                    const df = k - 1;
+                    result.statName = 'H (Chi-Square)';
+                    result.statistic = H;
+                    result.df = df;
+                    result.pValue = chiSquarePValue(H, df);
+
+                    if (result.pValue < 0.05) {
+                        const numComparisons = (k * (k - 1)) / 2;
+                        const groups = parsedData.groups;
+                        for (let i = 0; i < k; i++) {
+                            for (let j = i + 1; j < k; j++) {
+                                const g1 = groups[i], g2 = groups[j];
+                                const n1 = groupStats[g1].n, n2 = groupStats[g2].n;
+                                const meanR1 = groupStats[g1].rankSum / n1;
+                                const meanR2 = groupStats[g2].rankSum / n2;
+                                
+                                const se = Math.sqrt((N * (N + 1) / 12) * tieCorrection * (1/n1 + 1/n2));
+                                const z = Math.abs(meanR1 - meanR2) / se;
+                                const pUnadj = 2 * (1 - normalCDF(z));
+                                const pAdj = Math.min(1.0, pUnadj * numComparisons);
+                                
+                                result.comparisons.push({ g1, g2, z, pUnadj, pAdj });
+                            }
+                        }
+                    }
+                }
+
+                setAnalysisResult(result);
+                
+                // 重新渲染数学公式
+                setTimeout(() => {
+                    if (window.MathJax) window.MathJax.typesetPromise();
+                }, 100);
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
+                    <div className="max-w-6xl mx-auto space-y-6">
+                        
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-300 flex items-center space-x-4">
+                            <div className="p-3 bg-blue-600 text-white rounded-lg shadow-inner">
+                                <BarChartIcon />
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold text-slate-900">物语科研_独立样本非参数检验分析系统</h1>
+                                <p className="text-slate-500 text-sm mt-1">支持自动频数合并、结值校正及事后多重比较 (Dunn's Test)</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                            
+                            <div className="lg:col-span-5 space-y-6">
+                                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-300">
+                                    <h2 className="text-lg font-bold mb-4 flex items-center text-slate-800 border-b pb-2">
+                                        <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm mr-2">1</span>
+                                        数据录入
+                                    </h2>
+                                    
+                                    <div className="mb-5">
+                                        <div className="flex space-x-6 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                                            <label className="flex items-center space-x-2 cursor-pointer">
+                                                <input type="radio" checked={dataType === 'continuous'} onChange={() => handleTypeChange('continuous')} className="w-4 h-4 text-blue-600 focus:ring-blue-500" />
+                                                <span className="font-medium">计量资料</span>
+                                            </label>
+                                            <label className="flex items-center space-x-2 cursor-pointer">
+                                                <input type="radio" checked={dataType === 'ordinal'} onChange={() => handleTypeChange('ordinal')} className="w-4 h-4 text-blue-600 focus:ring-blue-500" />
+                                                <span className="font-medium">等级资料</span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div className="mb-4">
+                                        <label className="block text-sm font-bold text-slate-700 mb-2 flex justify-between items-end">
+                                            <span>从 Excel 粘贴数据</span>
+                                            <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-1 rounded">格式: 组别 | 数值/等级 | 频数(可选)</span>
+                                        </label>
+                                        <textarea
+                                            className="w-full h-48 p-3 border border-slate-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm font-mono shadow-inner"
+                                            value={inputText}
+                                            onChange={(e) => setInputText(e.target.value)}
+                                        />
+                                    </div>
+
+                                    {parsedData.valid && (
+                                        <div className="mt-4">
+                                            <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center">
+                                                <TableIcon /> 数据解析预览 (已自动合并重复项)
+                                            </h3>
+                                            <div className="max-h-48 overflow-y-auto border border-slate-400 shadow-sm">
+                                                <table className="w-full text-sm text-left border-collapse">
+                                                    <thead className="bg-slate-200 text-slate-700 sticky top-0 shadow-sm">
+                                                        <tr>
+                                                            <th className="border border-slate-400 px-3 py-1.5 font-semibold w-12 text-center">#</th>
+                                                            <th className="border border-slate-400 px-3 py-1.5 font-semibold">组别</th>
+                                                            <th className="border border-slate-400 px-3 py-1.5 font-semibold">{dataType === 'ordinal' ? '等级' : '数值'}</th>
+                                                            <th className="border border-slate-400 px-3 py-1.5 font-semibold text-right">频数</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="bg-white">
+                                                        {parsedData.aggregated.map((item, idx) => (
+                                                            <tr key={idx} className="hover:bg-blue-50">
+                                                                <td className="border border-slate-300 px-3 py-1 text-slate-400 text-center">{idx + 1}</td>
+                                                                <td className="border border-slate-300 px-3 py-1">{item.group}</td>
+                                                                <td className="border border-slate-300 px-3 py-1">{item.rawValue}</td>
+                                                                <td className="border border-slate-300 px-3 py-1 text-right font-mono">{item.freq}</td>
+                                                            </tr>
+                                                        ))}
+                                                        <tr className="bg-slate-100 font-bold">
+                                                            <td colSpan="3" className="border border-slate-400 px-3 py-1 text-right">总样本量 (N) =</td>
+                                                            <td className="border border-slate-400 px-3 py-1 text-right text-blue-700">{parsedData.totalN}</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-7 space-y-6">
+                                
+                                {dataType === 'ordinal' && parsedData.uniqueValues.length > 0 && (
+                                    <div className="bg-white p-5 rounded-xl shadow-sm border border-amber-300 bg-amber-50/20">
+                                        <h2 className="text-lg font-bold mb-3 flex items-center text-amber-800 border-b border-amber-200 pb-2">
+                                            <span className="bg-amber-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm mr-2">2</span>
+                                            等级赋值 (请按从低到高排序)
+                                        </h2>
+                                        <p className="text-sm text-amber-700 mb-4">算法需要知道等级的大小顺序。请使用上下箭头调整，最上方为最低级(赋值1)。</p>
+                                        
+                                        <div className="grid grid-cols-2 gap-3">
+                                            {ordinalOrder.map((val, idx) => (
+                                                <div key={val} className="flex items-center bg-white border border-amber-300 p-2 rounded shadow-sm">
+                                                    <div className="w-14 text-center text-xs font-bold text-amber-600 bg-amber-100 rounded px-1 py-1 mr-2 border border-amber-200">
+                                                        赋值 {idx + 1}
+                                                    </div>
+                                                    <div className="flex-1 font-semibold text-slate-800 truncate">{val}</div>
+                                                    <div className="flex flex-col space-y-1 ml-2">
+                                                        <button onClick={() => moveOrdinal(idx, 'up')} disabled={idx === 0} className="px-2 py-0.5 bg-slate-100 hover:bg-amber-100 border border-slate-300 rounded text-xs disabled:opacity-30">▲</button>
+                                                        <button onClick={() => moveOrdinal(idx, 'down')} disabled={idx === ordinalOrder.length - 1} className="px-2 py-0.5 bg-slate-100 hover:bg-amber-100 border border-slate-300 rounded text-xs disabled:opacity-30">▼</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <button
+                                    onClick={runAnalysis}
+                                    disabled={!parsedData.valid}
+                                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center text-lg border-b-4 border-blue-800 active:border-b-0 active:translate-y-1"
+                                >
+                                    执行非参数检验 <ArrowRightIcon />
+                                </button>
+
+                                {analysisResult && (
+                                    <div className="bg-white p-6 rounded-xl shadow-md border border-slate-300">
+                                        <h2 className="text-xl font-bold border-b-2 border-slate-800 pb-2 mb-5 flex items-center text-slate-900">
+                                            <span className="bg-green-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm mr-2">3</span>
+                                            检验结果: {analysisResult.testName}
+                                        </h2>
+
+                                        <div className="flex flex-wrap gap-4 mb-6">
+                                            <div className="flex-1 bg-slate-50 p-4 rounded border border-slate-300 shadow-sm">
+                                                <div className="text-slate-600 text-sm font-bold mb-1">统计量 ({analysisResult.statName})</div>
+                                                <div className="text-2xl font-mono font-bold text-slate-800">{analysisResult.statistic.toFixed(4)}</div>
+                                            </div>
+                                            {analysisResult.df && (
+                                                <div className="flex-1 bg-slate-50 p-4 rounded border border-slate-300 shadow-sm">
+                                                    <div className="text-slate-600 text-sm font-bold mb-1">自由度 (df)</div>
+                                                    <div className="text-2xl font-mono font-bold text-slate-800">{analysisResult.df}</div>
+                                                </div>
+                                            )}
+                                            <div className={`flex-1 p-4 rounded border shadow-sm ${analysisResult.pValue < 0.05 ? 'bg-green-50 border-green-400' : 'bg-slate-50 border-slate-300'}`}>
+                                                <div className="text-slate-600 text-sm font-bold mb-1">显著性 (P值)</div>
+                                                <div className={`text-2xl font-mono font-bold ${analysisResult.pValue < 0.05 ? 'text-green-700' : 'text-slate-800'}`}>
+                                                    {analysisResult.pValue < 0.001 ? '< 0.001' : analysisResult.pValue.toFixed(4)}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="mb-6">
+                                            <h3 className="font-bold text-slate-800 mb-2">秩和统计量 (Ranks)</h3>
+                                            <div className="overflow-x-auto border border-slate-400 shadow-sm">
+                                                <table className="w-full text-sm text-left border-collapse">
+                                                    <thead className="bg-slate-200 text-slate-800">
+                                                        <tr>
+                                                            <th className="border border-slate-400 px-4 py-2 font-bold">组别</th>
+                                                            <th className="border border-slate-400 px-4 py-2 font-bold text-right">样本量 (N)</th>
+                                                            <th className="border border-slate-400 px-4 py-2 font-bold text-right">秩和 (Sum of Ranks)</th>
+                                                            <th className="border border-slate-400 px-4 py-2 font-bold text-right">平均秩 (Mean Rank)</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="bg-white">
+                                                        {Object.entries(analysisResult.groupStats).map(([group, stats]) => (
+                                                            <tr key={group} className="hover:bg-slate-50">
+                                                                <td className="border border-slate-300 px-4 py-2 font-medium">{group}</td>
+                                                                <td className="border border-slate-300 px-4 py-2 text-right">{stats.n}</td>
+                                                                <td className="border border-slate-300 px-4 py-2 text-right">{stats.rankSum.toFixed(1)}</td>
+                                                                <td className="border border-slate-300 px-4 py-2 text-right">{(stats.rankSum / stats.n).toFixed(2)}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+
+                                        {analysisResult.comparisons && analysisResult.comparisons.length > 0 && (
+                                            <div className="mb-6">
+                                                <h3 className="font-bold text-slate-800 mb-2 flex items-center">
+                                                    事后多重比较 (Dunn's Test)
+                                                    <span className="ml-2 text-xs font-normal bg-blue-100 text-blue-800 px-2 py-0.5 rounded">Bonferroni 校正</span>
+                                                </h3>
+                                                <div className="overflow-x-auto border border-slate-400 shadow-sm">
+                                                    <table className="w-full text-sm text-left border-collapse">
+                                                        <thead className="bg-slate-200 text-slate-800">
+                                                            <tr>
+                                                                <th className="border border-slate-400 px-4 py-2 font-bold">对比组 (Group 1 vs Group 2)</th>
+                                                                <th className="border border-slate-400 px-4 py-2 font-bold text-right">检验统计量 (Z)</th>
+                                                                <th className="border border-slate-400 px-4 py-2 font-bold text-right">未校正 P值</th>
+                                                                <th className="border border-slate-400 px-4 py-2 font-bold text-right">校正后 P值 (Adj. P)</th>
+                                                                <th className="border border-slate-400 px-4 py-2 font-bold text-center">显著性</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="bg-white">
+                                                            {analysisResult.comparisons.map((comp, idx) => (
+                                                                <tr key={idx} className={comp.pAdj < 0.05 ? "bg-green-50/50" : "hover:bg-slate-50"}>
+                                                                    <td className="border border-slate-300 px-4 py-2 font-medium">{comp.g1} - {comp.g2}</td>
+                                                                    <td className="border border-slate-300 px-4 py-2 text-right">{comp.z.toFixed(3)}</td>
+                                                                    <td className="border border-slate-300 px-4 py-2 text-right">{comp.pUnadj.toFixed(4)}</td>
+                                                                    <td className="border border-slate-300 px-4 py-2 text-right font-bold text-blue-700">
+                                                                        {comp.pAdj < 0.001 ? '< 0.001' : comp.pAdj.toFixed(4)}
+                                                                    </td>
+                                                                    <td className="border border-slate-300 px-4 py-2 text-center">
+                                                                        {comp.pAdj < 0.05 ? <span className="text-green-600 font-bold">显著 (*)</span> : <span className="text-slate-400">不显著</span>}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="mt-4 p-4 bg-slate-100 border border-slate-300 rounded text-sm text-slate-700 leading-relaxed">
+                                            <strong>统计结论：</strong>
+                                            {analysisResult.pValue < 0.05 ? (
+                                                <span>
+                                                    按 \(\alpha = 0.05\) 水准，拒绝原假设，认为 <strong>{analysisResult.k} 个样本组之间存在显著的统计学差异</strong>。
+                                                    {analysisResult.comparisons && analysisResult.comparisons.length > 0 && " 具体组间差异请参考上方的多重比较表格。"}
+                                                </span>
+                                            ) : (
+                                                <span>
+                                                    按 \(\alpha = 0.05\) 水准，不拒绝原假设，尚不能认为 <strong>{analysisResult.k} 个样本组之间存在显著的统计学差异</strong>。
+                                                </span>
+                                            )}
+                                        </div>
+
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 渲染 React 应用
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<NonParametricTool />);
+    </script>
+</body>
+</html>
